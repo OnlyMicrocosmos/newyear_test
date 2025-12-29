@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>致小江同学 - 2026跨年倒计时</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #050505; font-family: "Microsoft YaHei", sans-serif; }
+        canvas { display: block; }
+
+        /* 引导页：解决浏览器禁止自动播放声音的问题 */
+        #start-screen {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.95);
+            z-index: 100;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            color: white;
+            transition: opacity 1s;
+        }
+        #start-btn {
+            padding: 15px 40px;
+            font-size: 1.5rem;
+            background: transparent;
+            color: #fff;
+            border: 2px solid #fff;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.3s;
+            animation: pulse 2s infinite;
+        }
+        #start-btn:hover { background: #fff; color: #000; }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.4); } 70% { box-shadow: 0 0 0 20px rgba(255, 255, 255, 0); } 100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); } }
+
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 10;
+            display: flex; justify-content: center; align-items: center; flex-direction: column;
+            opacity: 0; /* 初始隐藏，点击开始后显示 */
+            transition: opacity 1s;
+        }
+
+        /* 音乐控制按钮（右上角） */
+        #music-control {
+            position: absolute; top: 20px; right: 20px;
+            z-index: 20; pointer-events: auto; cursor: pointer;
+            opacity: 0.5; transition: opacity 0.3s;
+            font-size: 24px; color: white;
+            display: none; /* 初始隐藏 */
+        }
+        #music-control:hover { opacity: 1; }
+
+        /* 倒计时面板 */
+        #clock-container {
+            text-align: center;
+            color: rgba(255, 255, 255, 0.95);
+            background: rgba(0, 0, 0, 0.3);
+            padding: 20px 40px;
+            border-radius: 15px;
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(255,255,255,0.1);
+            transition: opacity 1s, transform 0.5s;
+        }
+        #clock-title { font-size: 1.2rem; letter-spacing: 5px; margin-bottom: 15px; color: #ccc; text-transform: uppercase; }
+        #clock-time { font-family: 'Courier New', Courier, monospace; font-size: 3.5rem; font-weight: bold; text-shadow: 0 0 15px rgba(255, 255, 255, 0.6); }
+
+        @media (max-width: 768px) {
+            #clock-time { font-size: 1.8rem; }
+            #clock-title { font-size: 0.9rem; }
+            #clock-container { padding: 15px 20px; width: 80%; }
+        }
+
+        #countdown-number {
+            font-family: 'Arial Black', sans-serif;
+            font-size: 20vw; font-weight: 900; color: #fff;
+            opacity: 0; position: absolute; text-align: center; line-height: 1;
+            text-shadow: 0 0 30px rgba(255, 255, 255, 0.8);
+            transition: opacity 0.2s;
+        }
+        .hidden { opacity: 0 !important; pointer-events: none; transform: scale(0.9); }
+    </style>
+</head>
+<body>
+
+    <!-- 音乐文件 -->
+    <audio id="bgm" src="bgm.mp3" loop preload="auto"></audio>
+
+    <!-- 启动屏幕 -->
+    <div id="start-screen">
+        <h1 style="margin-bottom: 30px; letter-spacing: 2px;">开启 2026</h1>
+        <button id="start-btn">点击开始</button>
+    </div>
+
+    <!-- 音乐开关 -->
+    <div id="music-control">♪</div>
+
+    <!-- 界面层 -->
+    <div id="ui-layer">
+        <div id="clock-container">
+            <div id="clock-title">距离 2026 年还有</div>
+            <div id="clock-time">Loading...</div>
+        </div>
+        <div id="countdown-number"></div>
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+    <script>
+        // ================= 配置区 =================
+        const targetDate = new Date(new Date().getTime() + 16000); // 调试用
+
+        const BLESSINGS = [
+            "小江同学",
+            "辞暮尔尔",
+            "烟火年年",
+            "朝朝暮暮",
+            "岁岁平安",
+            "2026",
+            "新年快乐！"
+        ];
+        // =========================================
+
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const clockContainer = document.getElementById('clock-container');
+        const clockTimeEl = document.getElementById('clock-time');
+        const countEl = document.getElementById('countdown-number');
+        const startScreen = document.getElementById('start-screen');
+        const startBtn = document.getElementById('start-btn');
+        const uiLayer = document.getElementById('ui-layer');
+        const bgm = document.getElementById('bgm');
+        const musicControl = document.getElementById('music-control');
+
+        let width, height;
+        let stars = [], fireworks = [], particles = [], textParticles = [];
+        let state = 'long-countdown';
+        let textIndex = 0;
+        let textTimer = 0;
+        let isRunning = false; // 控制程序是否开始运行
+
+        // --- 音乐控制逻辑 ---
+        startBtn.addEventListener('click', () => {
+            // 播放音乐
+            bgm.play().catch(e => console.log("播放失败，可能是文件路径错误", e));
+            // 隐藏开始屏
+            startScreen.style.opacity = 0;
+            setTimeout(() => {
+                startScreen.style.display = 'none';
+                uiLayer.style.opacity = 1;
+                musicControl.style.display = 'block';
+                isRunning = true;
+                loop(); // 开始动画循环
+            }, 1000);
+        });
+
+        musicControl.addEventListener('click', () => {
+            if (bgm.paused) {
+                bgm.play();
+                musicControl.style.opacity = 1;
+            } else {
+                bgm.pause();
+                musicControl.style.opacity = 0.5;
+            }
+        });
+
+        // 调整窗口大小
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // 辅助函数
+        function random(min, max) { return Math.random() * (max - min) + min; }
+
+        // --- 类定义 (Star, Firework, Particle, TextParticle) ---
+        class Star {
+            constructor() {
+                this.x = Math.random() * width; this.y = Math.random() * height;
+                this.size = Math.random() * 1.5;
+                this.blinkSpeed = 0.01 + Math.random() * 0.03;
+                this.alpha = Math.random(); this.blinkDir = 1;
+            }
+            update() {
+                this.alpha += this.blinkSpeed * this.blinkDir;
+                if (this.alpha >= 1 || this.alpha <= 0.2) this.blinkDir *= -1;
+            }
+            draw() {
+                ctx.fillStyle = `rgba(255, 255, 255, ${this.alpha})`;
+                ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2); ctx.fill();
+            }
+        }
+
+        class Firework {
+            constructor(x, targetY) {
+                this.x = x; this.y = height; this.targetY = targetY;
+                this.speed = random(12, 18);
+                this.angle = -Math.PI / 2 + (Math.random() - 0.5) * 0.1;
+                this.vx = Math.cos(this.angle) * this.speed * 0.1;
+                this.vy = Math.sin(this.angle) * this.speed;
+                this.hue = Math.random() * 360; this.dead = false;
+            }
+            update() {
+                this.x += this.vx; this.y += this.vy; this.vy += 0.15;
+                if (this.vy >= 0 || this.y <= this.targetY) {
+                    this.dead = true; createExplosion(this.x, this.y, this.hue);
+                }
+            }
+            draw() {
+                ctx.strokeStyle = `hsl(${this.hue}, 100%, 60%)`; ctx.lineWidth = 3;
+                ctx.beginPath(); ctx.moveTo(this.x, this.y);
+                ctx.lineTo(this.x - this.vx * 3, this.y - this.vy * 3); ctx.stroke();
+            }
+        }
+
+        class Particle {
+            constructor(x, y, hue) {
+                this.x = x; this.y = y;
+                let angle = Math.random() * Math.PI * 2; let speed = random(2, 6);
+                this.vx = Math.cos(angle) * speed; this.vy = Math.sin(angle) * speed;
+                this.hue = hue; this.alpha = 1; this.decay = random(0.01, 0.02);
+                this.gravity = 0.08; this.friction = 0.96;
+            }
+            update() {
+                this.vx *= this.friction; this.vy *= this.friction; this.vy += this.gravity;
+                this.x += this.vx; this.y += this.vy; this.alpha -= this.decay;
+            }
+            draw() {
+                ctx.globalCompositeOperation = 'lighter';
+                ctx.fillStyle = `hsla(${this.hue}, 100%, 60%, ${this.alpha})`;
+                ctx.beginPath(); ctx.arc(this.x, this.y, 2, 0, Math.PI * 2); ctx.fill();
+                ctx.globalCompositeOperation = 'source-over';
+            }
+        }
+
+        class TextParticle {
+            constructor(tx, ty) {
+                this.tx = tx; this.ty = ty;
+                if(Math.random() < 0.5) {
+                    this.x = Math.random() < 0.5 ? -100 : width + 100;
+                    this.y = Math.random() * height;
+                } else {
+                    this.x = Math.random() * width;
+                    this.y = Math.random() < 0.5 ? -100 : height + 100;
+                }
+                this.vx = 0; this.vy = 0;
+                let rand = Math.random();
+                if(rand < 0.6) this.color = `hsl(${random(30, 50)}, 100%, ${random(50, 80)}%)`;
+                else if (rand < 0.9) this.color = `hsl(${random(320, 360)}, 100%, ${random(60, 80)}%)`;
+                else this.color = `hsl(0, 0%, ${random(80, 100)}%)`;
+                this.state = 'forming';
+            }
+            update() {
+                if (this.state === 'forming') {
+                    this.x += (this.tx - this.x) * 0.06;
+                    this.y += (this.ty - this.y) * 0.06;
+                } else if (this.state === 'exploding') {
+                    this.x += this.vx; this.y += this.vy;
+                    this.vy += 0.05; this.vx *= 0.98; this.vy *= 0.98;
+                }
+            }
+            explode() {
+                this.state = 'exploding';
+                let angle = Math.random() * Math.PI * 2; let speed = random(1, 4);
+                this.vx = Math.cos(angle) * speed; this.vy = Math.sin(angle) * speed;
+            }
+            draw() { ctx.fillStyle = this.color; ctx.beginPath(); ctx.arc(this.x, this.y, 1.8, 0, Math.PI * 2); ctx.fill(); }
+        }
+
+        function createExplosion(x, y, hue) {
+            for (let i = 0; i < 80; i++) particles.push(new Particle(x, y, hue));
+        }
+
+        function spawnTextParticles(text) {
+            textParticles = [];
+            const offCvs = document.createElement('canvas');
+            offCvs.width = width; offCvs.height = height;
+            const offCtx = offCvs.getContext('2d');
+            let fontSize = Math.min(width, height) * 0.2;
+            if (width < 600) fontSize = width * 0.25;
+            offCtx.font = `900 ${fontSize}px "Microsoft YaHei", sans-serif`;
+            offCtx.fillStyle = "white"; offCtx.textAlign = "center"; offCtx.textBaseline = "middle";
+            offCtx.fillText(text, width / 2, height / 2);
+            const data = offCtx.getImageData(0, 0, width, height).data;
+            let step = Math.floor(fontSize / 18); if(step < 3) step = 3;
+            for (let y = 0; y < height; y += step) {
+                for (let x = 0; x < width; x += step) {
+                    if (data[(y * width + x) * 4 + 3] > 128) textParticles.push(new TextParticle(x, y));
+                }
+            }
+        }
+
+        for(let i=0; i<200; i++) stars.push(new Star());
+
+        // --- 主循环 ---
+        function loop() {
+            if (!isRunning) return;
+
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+            ctx.fillRect(0, 0, width, height);
+
+            stars.forEach(s => { s.update(); s.draw(); });
+
+            const now = new Date();
+            const diff = targetDate - now;
+
+            if (diff > 0) {
+                const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+                const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+                if (diff > 10500) {
+                    state = 'long-countdown';
+                    clockTimeEl.innerHTML = `<span style="font-size:0.5em; vertical-align:middle">${days}天</span> ${hours.toString().padStart(2,'0')}:${minutes.toString().padStart(2,'0')}:${seconds.toString().padStart(2,'0')}`;
+                } else {
+                    if (state === 'long-countdown') {
+                        state = 'final-countdown';
+                        clockContainer.classList.add('hidden');
+                        countEl.style.opacity = 1;
+                    }
+                    countEl.innerText = seconds;
+                    const beat = (diff % 1000) / 1000;
+                    const scale = 1 + beat * 0.8;
+                    countEl.style.transform = `scale(${scale})`;
+                    const hue = (seconds * 36) % 360;
+                    countEl.style.color = `hsl(${hue}, 100%, 60%)`;
+                    countEl.style.textShadow = `0 0 50px hsl(${hue}, 100%, 40%)`;
+                    if (Math.random() < 0.15) fireworks.push(new Firework(Math.random() * width, height * 0.3));
+                }
+            } else {
+                if (state !== 'celebration') {
+                    state = 'celebration';
+                    countEl.classList.add('hidden');
+                    spawnTextParticles(BLESSINGS[0]);
+                }
+            }
+
+            if (state === 'celebration') {
+                if (Math.random() < 0.08) fireworks.push(new Firework(Math.random() * width, height * 0.4));
+                let allExploded = true;
+                textParticles.forEach(p => {
+                    p.update(); p.draw();
+                    if (p.state !== 'exploding') allExploded = false;
+                });
+                if (!allExploded) {
+                    textTimer++;
+                    // === 修改点：文字停留时间改成了300（约5秒） ===
+                    if (textTimer > 300) {
+                        textParticles.forEach(p => p.explode());
+                        textTimer = 0;
+                        setTimeout(() => {
+                            textIndex++;
+                            if (textIndex < BLESSINGS.length) spawnTextParticles(BLESSINGS[textIndex]);
+                        }, 1500);
+                    }
+                }
+            }
+
+            fireworks.forEach((f, i) => { f.update(); f.draw(); if(f.dead) fireworks.splice(i, 1); });
+            particles.forEach((p, i) => { p.update(); p.draw(); if(p.alpha <= 0) particles.splice(i, 1); });
+
+            requestAnimationFrame(loop);
+        }
+
+        // 如果想让背景一开始就有星星（在点击开始前），可以先绘制一次
+        function drawStaticStars() {
+            ctx.fillStyle = '#050505'; ctx.fillRect(0,0,width,height);
+            stars.forEach(s => s.draw());
+        }
+        drawStaticStars();
+
+    </script>
+</body>
+</html>
